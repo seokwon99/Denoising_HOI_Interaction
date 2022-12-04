@@ -13,7 +13,6 @@ from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
                        accuracy, get_world_size, interpolate,
                        is_dist_avail_and_initialized)
 
-
 class DETRHOI(nn.Module):
 
     def __init__(self, backbone, transformer, num_obj_classes, num_verb_classes, num_queries, aux_loss=False):
@@ -26,6 +25,7 @@ class DETRHOI(nn.Module):
         self.verb_class_embed = nn.Linear(hidden_dim, num_verb_classes)
         self.sub_bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.obj_bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
@@ -33,8 +33,9 @@ class DETRHOI(nn.Module):
     def forward(self, samples: NestedTensor):
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
 
+        features, pos = self.backbone(samples)
+        
         src, mask = features[-1].decompose()
         assert mask is not None
         hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
@@ -43,6 +44,7 @@ class DETRHOI(nn.Module):
         outputs_verb_class = self.verb_class_embed(hs)
         outputs_sub_coord = self.sub_bbox_embed(hs).sigmoid()
         outputs_obj_coord = self.obj_bbox_embed(hs).sigmoid()
+        
         out = {'pred_obj_logits': outputs_obj_class[-1], 'pred_verb_logits': outputs_verb_class[-1],
                'pred_sub_boxes': outputs_sub_coord[-1], 'pred_obj_boxes': outputs_obj_coord[-1]}
         if self.aux_loss:
@@ -242,7 +244,6 @@ class SetCriterionHOI(nn.Module):
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_interactions, **kwargs)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
                     losses.update(l_dict)
-
         return losses
 
 

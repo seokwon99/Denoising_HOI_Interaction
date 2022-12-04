@@ -8,6 +8,7 @@ from collections import defaultdict
 class VCOCOEvaluator():
 
     def __init__(self, preds, gts, subject_category_id, correct_mat):
+
         self.overlap_iou = 0.5
         self.max_hois = 100
 
@@ -42,14 +43,12 @@ class VCOCOEvaluator():
                 correct_mat = np.concatenate((correct_mat, np.ones((correct_mat.shape[0], 1))), axis=1)
                 masks = correct_mat[verb_labels, object_labels]
                 hoi_scores *= masks
-
                 hois = [{'subject_id': subject_id, 'object_id': object_id, 'category_id': category_id, 'score': score} for
                         subject_id, object_id, category_id, score in zip(subject_ids, object_ids, verb_labels, hoi_scores)]
                 hois.sort(key=lambda k: (k.get('score', 0)), reverse=True)
                 hois = hois[:self.max_hois]
             else:
                 hois = []
-
             self.preds.append({
                 'predictions': bboxes,
                 'hoi_prediction': hois

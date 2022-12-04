@@ -122,7 +122,6 @@ class VCOCO(torch.utils.data.Dataset):
 
             if self._transforms is not None:
                 img, _ = self._transforms(img, None)
-
             hois = []
             for hoi in img_anno['hoi_annotation']:
                 hois.append((hoi['subject_id'], hoi['object_id'], self._valid_verb_ids.index(hoi['category_id'])))

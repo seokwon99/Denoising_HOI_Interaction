@@ -24,12 +24,23 @@ from datasets.panoptic_eval import PanopticEvaluator
 from datasets.hico_eval import HICOEvaluator
 from datasets.vcoco_eval import VCOCOEvaluator
 
-
+import pickle
+    
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
+
+    with open("./coappear.pickle","rb") as fr:
+        coappear = pickle.load(fr)
+
+    object_index = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                  24, 25, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47,
+                  48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 67, 70,
+                  72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
+
     model.train()
     criterion.train()
+
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     if hasattr(criterion, 'loss_labels'):
@@ -38,16 +49,32 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         metric_logger.add_meter('obj_class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+        # label denoising
+        targets = list(targets)
+        for t, target in enumerate(targets):
+            objects = target['obj_labels']
+            verbs = target['verb_labels']
+            denoised_verb = torch.tensor(verbs)
+            for i, (object, verb) in enumerate(zip(objects, verbs)):
+                if object.item() == 80:
+                    continue
+                object = object_index[object.item()]
+                for j, v in enumerate(verb):
+                    if v.item() == 1.:
+                        for add in coappear[1][object][j]:
+                            denoised_verb[i][add] = 1
+            target['verb_label'] = denoised_verb
+            targets[t] = target
+            
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
-
+        
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
@@ -170,6 +197,14 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
 @torch.no_grad()
 def evaluate_hoi(dataset_file, model, postprocessors, data_loader, subject_category_id, device):
+    
+    with open("./coappear.pickle","rb") as fr:
+        coappear = pickle.load(fr)
+    object_index = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                  24, 25, 27, 28, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47,
+                  48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 67, 70,
+                  72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
+    
     model.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -180,12 +215,35 @@ def evaluate_hoi(dataset_file, model, postprocessors, data_loader, subject_categ
     indices = []
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
+        # label denoising
+        targets = list(targets)
+        for t, target in enumerate(targets):
+            objects = target['labels']
+            hois = target['hois']
+            denoised_hois = set()
+            for i, hoi in enumerate(hois):
+                sub = hoi[0].item()
+                obj = hoi[1].item()
+                verb = hoi[2].item()
+                denoised_hois.add((sub, obj, verb))
+                if obj == -1:
+                    continue
 
+                obj_class = object_index[objects[obj].item()]
+                if verb not in coappear[1][obj_class]:
+                    continue
+                for add in coappear[1][obj_class][verb]:
+                    denoised_hois.add((sub, obj, add))
+            denoised_hois = torch.tensor([list(dhoi) for dhoi in denoised_hois])
+            target['hois'] = denoised_hois
+            targets[t] = target
+        
         outputs = model(samples)
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['hoi'](outputs, orig_target_sizes)
 
         preds.extend(list(itertools.chain.from_iterable(utils.all_gather(results))))
+
         # For avoiding a runtime error, the copy is used
         gts.extend(list(itertools.chain.from_iterable(utils.all_gather(copy.deepcopy(targets)))))
 

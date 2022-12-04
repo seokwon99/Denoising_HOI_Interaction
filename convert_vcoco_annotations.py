@@ -155,7 +155,9 @@ def main(args):
         json.dump(hoia_test_annotations, f)
 
     with open(args.prior_path, 'rb') as f:
-        prior = pickle.load(f)
+        u = pickle._Unpickler(f)
+        u.encoding = 'latin1'
+        prior = u.load()
 
     prior = [prior[k] for k in sorted(prior.keys())]
     prior = np.concatenate(prior).T
